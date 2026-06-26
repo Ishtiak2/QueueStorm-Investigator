@@ -180,89 +180,13 @@ curl https://queuestorm-investigator-7d8z.onrender.com/openapi.json | jq .
 
 ---
 
-## 5. Docker (fallback path)
+## 5. Deployed on Render
 
-The primary deployment target is Render (see §6). The Dockerfile is kept as a
-fallback for any judge who prefers containers — this is also **Submission Path B**
-per problem statement §10.
-
-### Build and run locally
-
-```bash
-docker build -t queuestorm-investigator .
-docker run --rm -p 8000:8000 queuestorm-investigator
-# -> uvicorn running on http://0.0.0.0:8000
-```
-
-### Pull a published image (judge-side re-run)
-
-```bash
-docker pull <your-dockerhub-user>/queuestorm-investigator:latest
-docker run --rm -p 8000:8000 <your-dockerhub-user>/queuestorm-investigator:latest
-```
-
-### Push to Docker Hub (if you build yourself)
-
-```bash
-docker tag queuestorm-investigator:latest <your-dockerhub-user>/queuestorm-investigator:latest
-docker push <your-dockerhub-user>/queuestorm-investigator:latest
-```
-
-`Dockerfile` uses a multi-stage build (`python:3.11-slim`) and runs as a
-non-root user; `.dockerignore` excludes `Should_Be_Hidden/`, `tests/`, `scripts/`,
-and `.venv/`. Cold start is < 60 s on the rubric's "ready in 60 s" check.
-
-### Runtime profile (per problem statement §9)
-
-| Item | Target |
-|---|---|
-| CPU and memory | 2 vCPU · 4 GB RAM |
-| GPU | Not required and not used |
-| Docker image size | < 5 GB (no model weights baked in — current image is ~200 MB) |
-| Per-request timeout | 30 s (enforced by judge harness) |
-| Health readiness after start | 60 s (enforced by judge harness) |
-
-No external API calls in the hot path. See [§7 Models](#7-models).
+**Live URL:** https://queuestorm-investigator-7d8z.onrender.com
 
 ---
 
-## 6. Deploying on Render (primary path)
-
-The repo ships a [Render Blueprint](https://render.com/docs/blueprint-spec) at
-`render.yaml`, so the service is one click away from a public URL.
-
-### Option A — Blueprint (one click)
-
-1. Sign in to https://render.com with GitHub.
-2. **New → Blueprint** → select `Ishtiak2/QueueStorm-Investigator`.
-3. Render reads `render.yaml` and provisions the service automatically:
-   - Runtime: Python 3.11 · Plan: Free · Region: Singapore
-   - Build: `pip install --upgrade pip && pip install -r requirements.txt`
-   - Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-   - Health check: `GET /health` · `autoDeploy: true`
-4. URL: `https://queuestorm-investigator-7d8z.onrender.com` (Render appends a
-   short suffix to the service name to keep global URLs unique).
-
-### Option B — Manual
-
-1. **New → Web Service → Connect repo** `Ishtiak2/QueueStorm-Investigator`.
-2. **Runtime**: Python 3 · **Build Command**: `pip install --upgrade pip && pip install -r requirements.txt`.
-3. **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-4. **Health Check Path**: `/health` · **Plan**: Free.
-
-### Verify the live deployment
-
-```bash
-curl https://queuestorm-investigator-7d8z.onrender.com/health
-# {"status":"ok"}
-```
-
-The first request after the free tier sleeps may take ~30 s to wake; subsequent
-requests are < 1 s.
-
----
-
-## 7. Models
+## 6. Models
 
 **This service runs no machine-learning models and makes no external API calls in
 the hot path.** Every classification, matching, and text-generation decision is
@@ -291,7 +215,7 @@ passes through `safety.sanitize_text()` before being returned to the customer.
 
 ---
 
-## 8. Safety logic
+## 7. Safety logic
 
 `app/safety.py` is the **last line of defence** — every free-text field
 (`agent_summary`, `recommended_next_action`, `customer_reply`) is passed through
@@ -350,7 +274,7 @@ the same string — which is asserted in `tests/test_safety.py`.
 
 ---
 
-## 9. Known limitations
+## 8. Known limitations
 
 | Limitation | Impact | Mitigation |
 |---|---|---|
@@ -364,7 +288,7 @@ the same string — which is asserted in `tests/test_safety.py`.
 
 ---
 
-## 10. Project layout
+## 9. Project layout
 
 ```
 .
@@ -392,16 +316,13 @@ the same string — which is asserted in `tests/test_safety.py`.
 ├── Procfile                # Render/Heroku start command
 ├── Dockerfile              # Docker fallback
 ├── .dockerignore
-├── .env.example            # Empty env stubs for optional LLM hookup
-├── RUNBOOK.md              # Copy-pasteable local bring-up guide
-├── sample_output.json      # Reference response for SAMPLE-01
 ├── pytest.ini
 └── README.md
 ```
 
 ---
 
-## 11. Team
+## 10. Team
 
 **Team Code Warriors** — Shahjalal University of Science & Technology
 
@@ -413,7 +334,7 @@ the same string — which is asserted in `tests/test_safety.py`.
 
 ---
 
-## 12. Submission paths
+## 11. Submission paths
 
 Per the problem statement, live URL is the preferred submission path.
 
