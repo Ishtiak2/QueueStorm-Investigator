@@ -1,0 +1,22 @@
+# Render Blueprint — QueueStorm Investigator
+# Deploy: https://render.com → New → Blueprint → connect this repo.
+# Render reads this file and provisions the service automatically.
+
+services:
+  - type: web
+    name: queuestorm-investigator
+    runtime: python
+    plan: free                     # Free tier; sleep after 15 min idle, wakes on request.
+    region: singapore              # Closest to Bangladesh; alternatives: frankfurt, oregon.
+    branch: main
+    autoDeploy: true               # Redeploy on every push to main.
+    healthCheckPath: /health
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
