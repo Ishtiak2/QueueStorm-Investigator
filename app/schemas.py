@@ -96,11 +96,11 @@ class TxnStatus(str, Enum):
 class TransactionHistoryEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    transaction_id: str = Field(..., min_length=1)
+    transaction_id: str = Field(..., min_length=1, max_length=128)
     timestamp: str = Field(..., description="ISO 8601 timestamp")
     type: TxnType
-    amount: float = Field(..., ge=0)
-    counterparty: str = Field(..., min_length=1)
+    amount: float = Field(..., ge=0, le=10_000_000)
+    counterparty: str = Field(..., min_length=1, max_length=64)
     status: TxnStatus
 
     @field_validator("timestamp")
@@ -116,16 +116,35 @@ class TransactionHistoryEntry(BaseModel):
 
 
 class AnalyzeTicketRequest(BaseModel):
+    """POST /analyze-ticket body. All required fields are non-empty strings.
+
+    Spec note: `transaction_history` is officially "Optional" (may be absent),
+    so it defaults to an empty list. `complaint` is technically required but
+    semantically must be non-empty; a Pydantic-only `min_length=1` rejects
+    empty strings with a 422.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    ticket_id: str = Field(..., min_length=1)
-    complaint: str = Field(..., min_length=1)
+    ticket_id: str = Field(..., min_length=1, max_length=128)
+    complaint: str = Field(..., min_length=1, max_length=8000)
     language: Optional[Language] = None
     channel: Optional[Channel] = None
     user_type: Optional[UserType] = None
-    campaign_context: Optional[str] = None
-    transaction_history: list[TransactionHistoryEntry] = Field(default_factory=list)
+    campaign_context: Optional[str] = Field(default=None, max_length=256)
+    transaction_history: list[TransactionHistoryEntry] = Field(
+        default_factory=list, max_length=50
+    )
     metadata: Optional[dict] = None
+
+    @field_validator("complaint")
+    @classmethod
+    def _strip_complaint(cls, v: str) -> str:
+        # Preserve the original text for evidence reasoning, but reject
+        # inputs that are only whitespace — those are semantically empty.
+        if not v.strip():
+            raise ValueError("complaint must contain non-whitespace characters")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -133,24 +152,30 @@ class AnalyzeTicketRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class AnalyzeTicketResponse(BaseModel):
+    """Strict response contract for POST /analyze-ticket.
+
+    Every field listed in Section 6.1 is declared here. `extra="forbid"`
+    means the judge harness can rely on the field set being exactly this.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    ticket_id: str
-    relevant_transaction_id: Optional[str]
+    ticket_id: str = Field(..., min_length=1)
+    relevant_transaction_id: Optional[str] = Field(default=None, max_length=128)
     evidence_verdict: EvidenceVerdict
     case_type: CaseType
     severity: Severity
     department: Department
-    agent_summary: str = Field(..., min_length=1)
-    recommended_next_action: str = Field(..., min_length=1)
-    customer_reply: str = Field(..., min_length=1)
+    agent_summary: str = Field(..., min_length=1, max_length=2000)
+    recommended_next_action: str = Field(..., min_length=1, max_length=2000)
+    customer_reply: str = Field(..., min_length=1, max_length=2000)
     human_review_required: bool
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     reason_codes: Optional[list[str]] = None
 
 
 # ---------------------------------------------------------------------------
-# Health
+# Health (Section 4 - GET /health)
 # ---------------------------------------------------------------------------
 
 class HealthResponse(BaseModel):
