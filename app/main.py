@@ -72,6 +72,7 @@ from app.schemas import (
     HealthResponse,
     Severity,
 )
+from app.safety import SafetyReport, detect_prompt_injection, sanitize_text
 
 logger = logging.getLogger("queuestorm")
 logging.basicConfig(
@@ -81,7 +82,7 @@ logging.basicConfig(
 
 app = FastAPI(
     title="QueueStorm Investigator",
-    version="0.3.0",
+    version="0.4.0",
     description="AI/API SupportOps copilot for digital finance complaints.",
 )
 
@@ -266,8 +267,32 @@ def _run_reasoning_pipeline(req: AnalyzeTicketRequest) -> AnalyzeTicketResponse:
     )
     reply = customer_reply(case_type, relevant_txn, verdict, complaint, language)
 
+    # 8. safety pass (Phase D): every text field must survive the four
+    # Section 8 rules. Anything that fires forces human review.
+    summary, summary_report = sanitize_text(summary)
+    next_action, next_action_report = sanitize_text(next_action)
+    reply, reply_report = sanitize_text(reply)
+    injection = detect_prompt_injection(complaint)
+    any_report = SafetyReport(
+        modified=any(r.modified for r in (summary_report, next_action_report, reply_report)),
+        credential_request=any(r.credential_request for r in (summary_report, next_action_report, reply_report)),
+        refund_promise=any(r.refund_promise for r in (summary_report, next_action_report, reply_report)),
+        bad_contact=any(r.bad_contact for r in (summary_report, next_action_report, reply_report)),
+        redactions=[tag for r in (summary_report, next_action_report, reply_report) for tag in r.redactions],
+    )
+
     confidence = confidence_for(case_type, match, verdict, complaint)
     reasons = reason_codes_for(case_type, match, verdict)
+    if injection:
+        reasons = list(reasons) + ["prompt_injection_detected"]
+
+    # Phase D escalation: any safety modification OR prompt-injection in
+    # the complaint OR the spec-mandated human_review rule.
+    needs_human = (
+        requires_human_review(case_type, amount, verdict, department)
+        or any_report.escalate()
+        or injection
+    )
 
     return AnalyzeTicketResponse(
         ticket_id=req.ticket_id,

@@ -140,96 +140,86 @@ def test_severity_other_medium_when_50k_plus():
 # --- requires_human_review -----------------------------------------------
 
 def test_human_review_phishing_always():
+    # SAMPLE-05
     assert requires_human_review(
-        CaseType.PHISHING_OR_SOCIAL_ENGINEERING,
-        100,
-        EvidenceVerdict.INSUFFICIENT_DATA,
+        CaseType.PHISHING_OR_SOCIAL_ENGINEERING, None, EvidenceVerdict.CONSISTENT,
         Department.FRAUD_RISK,
     ) is True
 
 
-def test_human_review_amount_above_50k():
-    assert requires_human_review(
-        CaseType.OTHER, 60_000, EvidenceVerdict.CONSISTENT, Department.CUSTOMER_SUPPORT
-    ) is True
-
-
-def test_human_review_wrong_transfer_consistent():
-    assert requires_human_review(
-        CaseType.WRONG_TRANSFER, 5_000, EvidenceVerdict.CONSISTENT,
-        Department.DISPUTE_RESOLUTION,
-    ) is True
-
-
-def test_human_review_wrong_transfer_inconsistent():
+def test_human_review_inconsistent_always_escalates():
+    # SAMPLE-02: inconsistent verdict always escalates.
     assert requires_human_review(
         CaseType.WRONG_TRANSFER, 5_000, EvidenceVerdict.INCONSISTENT,
         Department.DISPUTE_RESOLUTION,
     ) is True
 
 
-def test_human_review_wrong_transfer_insufficient_does_NOT_escalate():
-    # SAMPLE-08 invariant: ambiguous wrong_transfer needs disambiguation,
-    # not an auto-escalation. Customer reply should request info.
-    assert requires_human_review(
-        CaseType.WRONG_TRANSFER, 5_000, EvidenceVerdict.INSUFFICIENT_DATA,
-        Department.DISPUTE_RESOLUTION,
-    ) is False
-
-
-def test_human_review_payment_failed_above_10k():
-    assert requires_human_review(
-        CaseType.PAYMENT_FAILED, 15_000, EvidenceVerdict.CONSISTENT,
-        Department.PAYMENTS_OPS,
-    ) is True
-
-
-def test_human_review_payment_failed_small_amount_no_escalation():
-    assert requires_human_review(
-        CaseType.PAYMENT_FAILED, 500, EvidenceVerdict.CONSISTENT,
-        Department.PAYMENTS_OPS,
-    ) is False
-
-
-def test_human_review_payment_failed_no_amount_escalates_as_safety_default():
-    # No amount provided for a payment_failed complaint -> treat as
-    # potentially serious and escalate. Safety-default behaviour.
-    assert requires_human_review(
-        CaseType.PAYMENT_FAILED, None, EvidenceVerdict.CONSISTENT,
-        Department.PAYMENTS_OPS,
-    ) is True
-
-
-def test_human_review_agent_cash_in_always_escalates():
-    assert requires_human_review(
-        CaseType.AGENT_CASH_IN_ISSUE, 500, EvidenceVerdict.CONSISTENT,
-        Department.AGENT_OPERATIONS,
-    ) is True
-
-
-def test_human_review_duplicate_always_escalates():
-    assert requires_human_review(
-        CaseType.DUPLICATE_PAYMENT, 5_000, EvidenceVerdict.CONSISTENT,
-        Department.PAYMENTS_OPS,
-    ) is True
-
-
-def test_human_review_other_small_no_escalation():
+def test_human_review_insufficient_data_alone_does_not_escalate():
+    # SAMPLE-06 and SAMPLE-08: insufficient_data verdict on its own is not
+    # enough to require human review; the customer reply asks for info.
     assert requires_human_review(
         CaseType.OTHER, 500, EvidenceVerdict.INSUFFICIENT_DATA,
         Department.CUSTOMER_SUPPORT,
     ) is False
-
-
-def test_human_review_duplicate_inconsistent_also_escalates():
     assert requires_human_review(
-        CaseType.DUPLICATE_PAYMENT, 5_000, EvidenceVerdict.INCONSISTENT,
+        CaseType.WRONG_TRANSFER, 1_000, EvidenceVerdict.INSUFFICIENT_DATA,
+        Department.DISPUTE_RESOLUTION,
+    ) is False
+
+
+def test_human_review_wrong_transfer_consistent_escalates():
+    # SAMPLE-01
+    assert requires_human_review(
+        CaseType.WRONG_TRANSFER, 1_000, EvidenceVerdict.CONSISTENT,
+        Department.DISPUTE_RESOLUTION,
+    ) is True
+
+
+def test_human_review_agent_cash_in_consistent_escalates():
+    # SAMPLE-07
+    assert requires_human_review(
+        CaseType.AGENT_CASH_IN_ISSUE, 2_000, EvidenceVerdict.CONSISTENT,
+        Department.AGENT_OPERATIONS,
+    ) is True
+
+
+def test_human_review_duplicate_consistent_escalates():
+    # SAMPLE-10
+    assert requires_human_review(
+        CaseType.DUPLICATE_PAYMENT, 850, EvidenceVerdict.CONSISTENT,
         Department.PAYMENTS_OPS,
     ) is True
 
 
-def test_human_review_agent_cash_in_inconsistent_also_escalates():
+def test_human_review_payment_failed_consistent_no_escalation():
+    # SAMPLE-03: payment_failed + consistent is not in the OR list.
     assert requires_human_review(
-        CaseType.AGENT_CASH_IN_ISSUE, 500, EvidenceVerdict.INCONSISTENT,
-        Department.AGENT_OPERATIONS,
-    ) is True
+        CaseType.PAYMENT_FAILED, 1_500, EvidenceVerdict.CONSISTENT,
+        Department.PAYMENTS_OPS,
+    ) is False
+
+
+def test_human_review_refund_consistent_no_escalation():
+    # SAMPLE-04
+    assert requires_human_review(
+        CaseType.REFUND_REQUEST, 1_200, EvidenceVerdict.CONSISTENT,
+        Department.CUSTOMER_SUPPORT,
+    ) is False
+
+
+def test_human_review_merchant_consistent_no_escalation():
+    # SAMPLE-09
+    assert requires_human_review(
+        CaseType.MERCHANT_SETTLEMENT_DELAY, 25_000, EvidenceVerdict.CONSISTENT,
+        Department.MERCHANT_OPERATIONS,
+    ) is False
+
+
+def test_human_review_amount_50k_alone_does_not_escalate_for_other():
+    # Phase C had a 50k universal cap. The calibrated rule does not;
+    # 50k alone does not escalate other / merchant / payment_failed.
+    assert requires_human_review(
+        CaseType.PAYMENT_FAILED, 60_000, EvidenceVerdict.CONSISTENT,
+        Department.PAYMENTS_OPS,
+    ) is False

@@ -18,5 +18,5 @@ build/
 .idea/
 .vscode/
 *.log
-Should_Be_Hidden
+Should_Be_Hidden/
 .puku/
