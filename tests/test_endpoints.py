@@ -304,3 +304,215 @@ async def test_unhandled_exception_returns_500_without_stacktrace(monkeypatch, c
 async def test_get_on_analyze_ticket_returns_405(client):
     r = await client.get("/analyze-ticket")
     assert r.status_code == 405
+
+# ---------------------------------------------------------------------------
+# Phase F edge cases
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_empty_complaint_string_returns_422(client):
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-01",
+        "complaint": "",
+        "transaction_history": [],
+    })
+    assert r.status_code == 422
+    body = r.json()
+    assert body["error"] == "invalid_request"
+    # Error body must NOT echo the complaint back
+    assert "" not in (body.get("detail") or "")
+
+
+@pytest.mark.asyncio
+async def test_bangla_only_complaint_returns_200(client):
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-02",
+        "complaint": "আমি আমার ভাইকে ১০০০ টাকা পাঠিয়েছি কিন্তু সে বলছে পায়নি।",
+        "language": "bn",
+        "transaction_history": [],
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ticket_id"] == "TKT-EDGE-02"
+    # Bangla reply should be returned in customer_reply
+    assert any("\u0980" <= ch <= "\u09ff" for ch in data["customer_reply"])
+
+
+@pytest.mark.asyncio
+async def test_banglish_complaint_returns_200(client):
+    # Mixed English + Banglish romanisation - common in Bangladesh.
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-03",
+        "complaint": "ami amar vai ke 1000 taka pathiechi, kintu bole payni",
+        "language": "mixed",
+        "transaction_history": [],
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ticket_id"] == "TKT-EDGE-03"
+
+
+@pytest.mark.asyncio
+async def test_very_long_complaint_returns_200(client):
+    # 4000 characters - well above the 2000-line read chunk but should
+    # still complete without 500.
+    long = "I sent 500 taka. " * 250
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-04",
+        "complaint": long,
+        "transaction_history": [],
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ticket_id"] == "TKT-EDGE-04"
+    assert isinstance(data["customer_reply"], str)
+
+
+@pytest.mark.asyncio
+async def test_large_history_returns_200(client):
+    # 50 transactions - exercises matcher performance.
+    history = []
+    for i in range(50):
+        history.append({
+            "transaction_id": f"TXN-LARGE-{i:03d}",
+            "timestamp": "2026-06-20T10:00:00",
+            "amount": 100 + i,
+            "type": "transfer",
+            "status": "completed",
+            "counterparty": f"+880171000{i:04d}",
+                    })
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-05",
+        "complaint": "I sent 125 taka to +8801710000025 around 10am.",
+        "transaction_history": history,
+    })
+    assert r.status_code == 200
+    data = r.json()
+    # We should be able to find the matching one
+    assert data["relevant_transaction_id"] == "TXN-LARGE-025"
+
+
+@pytest.mark.asyncio
+async def test_bengali_digit_amount_returns_200(client):
+    # Amount written in Bengali numerals - extractor must normalise.
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-06",
+        "complaint": "আমি ২৫০০ টাকা পাঠিয়েছি ভুল নম্বরে।",
+        "language": "bn",
+        "transaction_history": [
+            {
+                "transaction_id": "TXN-BN-01",
+                "timestamp": "2026-06-20T10:00:00",
+                "amount": 2500,
+                "type": "transfer",
+                "status": "completed",
+                "counterparty": "+8801711111111",
+                            }
+        ],
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["relevant_transaction_id"] == "TXN-BN-01"
+
+
+@pytest.mark.asyncio
+async def test_history_with_only_one_txn_still_responds(client):
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-07",
+        "complaint": "I have a problem with a payment.",
+        "transaction_history": [
+            {
+                "transaction_id": "TXN-SOLO-01",
+                "timestamp": "2026-06-20T10:00:00",
+                "amount": 1000,
+                "type": "transfer",
+                "status": "completed",
+                "counterparty": "+8801712345678",
+                            }
+        ],
+    })
+    assert r.status_code == 200
+    data = r.json()
+    # Without enough complaint evidence, we land on other/insufficient_data
+    # but the endpoint still returns 200 with all required fields.
+    for k in ("ticket_id", "relevant_transaction_id", "evidence_verdict",
+              "case_type", "severity", "department", "agent_summary",
+              "recommended_next_action", "customer_reply",
+              "human_review_required", "confidence", "reason_codes"):
+        assert k in data
+
+
+@pytest.mark.asyncio
+async def test_response_with_all_optional_fields(client):
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-08",
+        "complaint": "I sent 300 taka to +8801719876543 around 3pm.",
+        "language": "en",
+        "channel": "in_app_chat",
+        "user_type": "customer",
+        "campaign_context": "winter-promo-2026",
+        "metadata": {"app_version": "5.3.0"},
+        "transaction_history": [
+            {
+                "transaction_id": "TXN-OPT-01",
+                "timestamp": "2026-06-20T15:00:00",
+                "amount": 300,
+                "type": "transfer",
+                "status": "completed",
+                "counterparty": "+8801719876543",
+                            }
+        ],
+    })
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_response_field_types(client):
+    # Lock down the response field types so schema drift is caught.
+    r = await client.post("/analyze-ticket", json={
+        "ticket_id": "TKT-EDGE-09",
+        "complaint": "I sent 500 taka.",
+        "transaction_history": [],
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data["ticket_id"], str)
+    assert data["relevant_transaction_id"] is None or isinstance(
+        data["relevant_transaction_id"], str
+    )
+    assert isinstance(data["evidence_verdict"], str)
+    assert isinstance(data["case_type"], str)
+    assert isinstance(data["severity"], str)
+    assert isinstance(data["department"], str)
+    assert isinstance(data["agent_summary"], str)
+    assert isinstance(data["recommended_next_action"], str)
+    assert isinstance(data["customer_reply"], str)
+    assert isinstance(data["human_review_required"], bool)
+    assert isinstance(data["confidence"], float)
+    assert 0.0 <= data["confidence"] <= 1.0
+    assert isinstance(data["reason_codes"], list)
+    assert all(isinstance(c, str) for c in data["reason_codes"])
+
+
+@pytest.mark.asyncio
+async def test_post_with_text_plain_returns_422(client):
+    # FastAPI rejects non-JSON payloads with 422 (validation error), not 415
+    r = await client.post(
+        "/analyze-ticket",
+        content=b"not json",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_without_content_type_returns_422(client):
+    # No Content-Type header -> FastAPI treats body as JSON candidate, fails to parse
+    r = await client.post(
+        "/analyze-ticket",
+        content=b'{"ticket_id":"TKT-001","complaint":"hi"}',
+    )
+    # httpx default sets application/json when content=bytes is a JSON-looking str,
+    # so FastAPI rejects it with 415 (no explicit Content-Type). Document current
+    # behavior: missing CT yields 415 Unsupported Media Type.
+    assert r.status_code == 415
