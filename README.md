@@ -37,6 +37,27 @@ returns the **12 fields** required by Section 6 of the problem statement:
 11. `confidence` (0.0 – 1.0)
 12. `reason_codes`
 
+### 1.1 Enum reference (exact match required)
+
+All enum values must match **exactly**. Per problem statement §7, variants (case
+differences, plural forms, alternate spellings) are scored as schema violations.
+
+| Field | Allowed values |
+|---|---|
+| `evidence_verdict` | `consistent` · `inconsistent` · `insufficient_data` |
+| `case_type` | `wrong_transfer` · `payment_failed` · `refund_request` · `duplicate_payment` · `merchant_settlement_delay` · `agent_cash_in_issue` · `phishing_or_social_engineering` · `other` |
+| `severity` | `low` · `medium` · `high` · `critical` |
+| `department` | `customer_support` · `dispute_resolution` · `payments_ops` · `merchant_operations` · `agent_operations` · `fraud_risk` |
+| `transaction.type` | `transfer` · `payment` · `cash_in` · `cash_out` · `settlement` · `refund` |
+| `transaction.status` | `completed` · `failed` · `pending` · `reversed` |
+| `language` (request) | `en` · `bn` · `mixed` |
+| `channel` (request) | `in_app_chat` · `call_center` · `email` · `merchant_portal` · `field_agent` |
+| `user_type` (request) | `customer` · `merchant` · `agent` · `unknown` |
+
+> ⚠️ **No variants, no plurals.** `Wrong_transfer`, `WrongTransfer`, or
+> `wrong-transfers` will all be rejected as schema violations by the judge
+> harness.
+
 ---
 
 ## 2. Setup
@@ -88,6 +109,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
 
 All endpoints accept and return `application/json`.
 
+### HTTP response codes (per problem statement §4.1)
+
+| Code | Meaning |
+|---|---|
+| `200` | Successful analysis. Response body conforms to the output schema. |
+| `400` | Malformed input (invalid JSON, missing required fields). Body carries a non-sensitive error message. |
+| `422` | Schema is valid but input is semantically invalid (e.g. empty `complaint`). |
+| `500` | Internal error. Body carries a non-sensitive error message. No stack traces, tokens, or secrets. |
+
+The service **must not crash** on malformed input — a 400 or 500 is acceptable;
+a process that exits or hangs is not.
+
 ### `GET /health` — liveness probe
 
 ```bash
@@ -108,7 +141,8 @@ curl -X POST https://queuestorm-investigator-7d8z.onrender.com/analyze-ticket \
   }'
 ```
 
-Full body with transaction history (matches the rubric fixture):
+Full body with transaction history (matches the rubric fixture; includes every
+optional field from problem statement §5.1):
 
 ```bash
 curl -X POST https://queuestorm-investigator-7d8z.onrender.com/analyze-ticket \
@@ -119,11 +153,13 @@ curl -X POST https://queuestorm-investigator-7d8z.onrender.com/analyze-ticket \
     "language": "en",
     "channel": "in_app_chat",
     "user_type": "customer",
+    "campaign_context": "boishakh_bonanza_day_1",
     "transaction_history": [
       {"transaction_id": "TXN-9101", "timestamp": "2026-04-14T14:08:22Z",
        "type": "transfer", "amount": 5000,
        "counterparty": "+8801719876543", "status": "completed"}
-    ]
+    ],
+    "metadata": {"agent_id": "AGENT-042", "session_id": "S-9911"}
   }'
 ```
 
@@ -147,7 +183,10 @@ curl https://queuestorm-investigator-7d8z.onrender.com/openapi.json | jq .
 ## 5. Docker (fallback path)
 
 The primary deployment target is Render (see §6). The Dockerfile is kept as a
-fallback for any judge who prefers containers.
+fallback for any judge who prefers containers — this is also **Submission Path B**
+per problem statement §10.
+
+### Build and run locally
 
 ```bash
 docker build -t queuestorm-investigator .
@@ -155,7 +194,14 @@ docker run --rm -p 8000:8000 queuestorm-investigator
 # -> uvicorn running on http://0.0.0.0:8000
 ```
 
-Push to Docker Hub (optional):
+### Pull a published image (judge-side re-run)
+
+```bash
+docker pull <your-dockerhub-user>/queuestorm-investigator:latest
+docker run --rm -p 8000:8000 <your-dockerhub-user>/queuestorm-investigator:latest
+```
+
+### Push to Docker Hub (if you build yourself)
 
 ```bash
 docker tag queuestorm-investigator:latest <your-dockerhub-user>/queuestorm-investigator:latest
@@ -165,6 +211,18 @@ docker push <your-dockerhub-user>/queuestorm-investigator:latest
 `Dockerfile` uses a multi-stage build (`python:3.11-slim`) and runs as a
 non-root user; `.dockerignore` excludes `Should_Be_Hidden/`, `tests/`, `scripts/`,
 and `.venv/`. Cold start is < 60 s on the rubric's "ready in 60 s" check.
+
+### Runtime profile (per problem statement §9)
+
+| Item | Target |
+|---|---|
+| CPU and memory | 2 vCPU · 4 GB RAM |
+| GPU | Not required and not used |
+| Docker image size | < 5 GB (no model weights baked in — current image is ~200 MB) |
+| Per-request timeout | 30 s (enforced by judge harness) |
+| Health readiness after start | 60 s (enforced by judge harness) |
+
+No external API calls in the hot path. See [§7 Models](#7-models).
 
 ---
 
